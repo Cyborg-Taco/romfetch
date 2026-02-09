@@ -9,6 +9,7 @@ set -e
 # Configuration
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 JSON_FILE="${SCRIPT_DIR}/roms.json"
+JSON_URL="https://raw.githubusercontent.com/Cyborg-Taco/Rom-Collection/main/roms.json"
 TEMP_DIR="/tmp/rom-downloader-$$"
 SELECTION_FILE="${TEMP_DIR}/selected_roms.txt"
 BASE_ROM_DIR="${HOME}/RetroPie/roms"
@@ -44,11 +45,54 @@ init() {
         exit 1
     fi
     
-    # Check if JSON file exists
-    if [ ! -f "${JSON_FILE}" ]; then
-        echo -e "${RED}Error: ${JSON_FILE} not found.${NC}"
-        echo "Please run generate_rom_json.py first to create the ROM database."
+    # Check if wget is installed
+    if ! command -v wget &> /dev/null; then
+        echo -e "${RED}Error: 'wget' is not installed.${NC}"
+        echo "Please install it with: sudo apt-get install wget"
         exit 1
+    fi
+    
+    # Check if JSON file exists, if not offer to download
+    check_json_update
+}
+
+# Download or update the JSON file
+download_json() {
+    local temp_json="${TEMP_DIR}/roms.json.tmp"
+    
+    echo "Downloading ROM database from repository..."
+    
+    if wget -q -O "${temp_json}" "${JSON_URL}"; then
+        # Verify it's valid JSON
+        if jq empty "${temp_json}" 2>/dev/null; then
+            mv "${temp_json}" "${JSON_FILE}"
+            echo "Successfully downloaded ROM database"
+            return 0
+        else
+            echo "Error: Downloaded file is not valid JSON"
+            rm -f "${temp_json}"
+            return 1
+        fi
+    else
+        echo "Error: Failed to download JSON file"
+        rm -f "${temp_json}"
+        return 1
+    fi
+}
+
+# Check if JSON needs updating
+check_json_update() {
+    if [ ! -f "${JSON_FILE}" ]; then
+        if dialog --yesno "ROM database not found. Download it now?" 10 50; then
+            download_json
+            if [ $? -ne 0 ]; then
+                dialog --msgbox "Failed to download ROM database. Please check your internet connection and try again." 10 50
+                exit 1
+            fi
+        else
+            dialog --msgbox "ROM database is required to continue." 8 40
+            exit 1
+        fi
     fi
 }
 
@@ -304,13 +348,14 @@ main_menu() {
         
         local choice
         choice=$(dialog --stdout --title "RetroPie ROM Downloader" \
-            --menu "Main Menu (${sel_count} ROMs selected):" 15 60 6 \
+            --menu "Main Menu (${sel_count} ROMs selected):" 17 60 8 \
             1 "Browse by System" \
             2 "Search for Games" \
             3 "View Selected ROMs" \
             4 "Download Selected ROMs" \
             5 "Clear All Selections" \
-            6 "Exit")
+            6 "Update ROM Database" \
+            7 "Exit")
         
         case "${choice}" in
             1) system_menu ;;
@@ -322,7 +367,17 @@ main_menu() {
                     > "${SELECTION_FILE}"
                 fi
                 ;;
-            6|"") exit 0 ;;
+            6)
+                if dialog --yesno "Download latest ROM database from repository?" 8 50; then
+                    download_json
+                    if [ $? -eq 0 ]; then
+                        dialog --msgbox "ROM database updated successfully!" 8 40
+                    else
+                        dialog --msgbox "Failed to update ROM database." 8 40
+                    fi
+                fi
+                ;;
+            7|"") exit 0 ;;
         esac
     done
 }
