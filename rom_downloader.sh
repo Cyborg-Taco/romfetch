@@ -190,10 +190,16 @@ search_games() {
     while true; do
         local choice
         choice=$(dialog --stdout --title "Search Results (${#results[@]} found)" \
-            --menu "Select a game to toggle selection (ESC to go back):" 20 70 12 \
+            --cancel-label "Back" \
+            --extra-button --extra-label "Back" \
+            --menu "Select a game to toggle selection:" 20 70 12 \
+            "0" "< Back" \
             "${options[@]}")
         
-        if [ -z "${choice}" ]; then
+        local exit_code=$?
+        
+        # exit_code: 0=OK, 1=Cancel, 3=Extra button
+        if [ ${exit_code} -eq 1 ] || [ ${exit_code} -eq 3 ] || [ -z "${choice}" ] || [ "${choice}" = "0" ]; then
             break
         fi
         
@@ -227,6 +233,7 @@ browse_system() {
         games=$(get_games "${system}")
         
         local options=()
+        options+=("0" "< Back")
         while IFS= read -r game; do
             local status="[ ]"
             if is_selected "${system}" "${game}"; then
@@ -240,10 +247,15 @@ browse_system() {
         
         local choice
         choice=$(dialog --stdout --title "${system} - ${rom_count} ROMs (${sel_count} selected)" \
-            --menu "Select a ROM to toggle selection (ESC to go back):" 20 70 12 \
+            --cancel-label "Back" \
+            --menu "Select a ROM to toggle selection:" 20 70 12 \
             "${options[@]}")
         
         if [ -z "${choice}" ]; then
+            break
+        fi
+        
+        if [ "${choice}" = "0" ]; then
             break
         fi
         
@@ -406,10 +418,12 @@ system_menu() {
         
         local choice
         choice=$(dialog --stdout --title "Select System" \
+            --cancel-label "Back" \
             --menu "Choose a system to browse:" 20 60 12 \
+            "0" "< Back" \
             "${options[@]}")
         
-        if [ -z "${choice}" ]; then
+        if [ -z "${choice}" ] || [ "${choice}" = "0" ]; then
             break
         fi
         
