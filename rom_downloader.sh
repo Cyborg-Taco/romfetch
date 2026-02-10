@@ -8,9 +8,10 @@
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 JSON_FILE="${SCRIPT_DIR}/roms.json"
 JSON_URL="https://raw.githubusercontent.com/Cyborg-Taco/Rom-Collection/main/roms.json"
+RAW_BASE_URL="https://raw.githubusercontent.com/Cyborg-Taco/Rom-Collection/main"
 TEMP_DIR="/tmp/rom-downloader-$$"
 SELECTION_FILE="${TEMP_DIR}/selected_roms.txt"
-BASE_ROM_DIR="${HOME}/RetroPie/roms"
+BASE_ROM_DIR="/home/pi/RetroPie/roms"
 
 # Colors for output
 RED='\033[0;31m'
@@ -277,7 +278,10 @@ download_selected() {
     
     # Create progress file
     local progress_file="${TEMP_DIR}/progress.txt"
+    local debug_log="${TEMP_DIR}/debug.log"
     echo "0" > "${progress_file}"
+    > "${debug_log}"
+    > "${TEMP_DIR}/errors.log"
     
     # Download in background and show progress
     {
@@ -291,38 +295,73 @@ download_selected() {
             echo "Downloading ${game}..."
             echo "XXX"
             
+            echo "Processing: System=${system}, Game=${game}" >> "${debug_log}"
+            
             # Get game info
             local game_info
             game_info=$(get_game_info "${system}" "${game}")
             
-            local download_url
-            download_url=$(echo "${game_info}" | jq -r '.download_url')
+            if [ -z "${game_info}" ] || [ "${game_info}" = "null" ]; then
+                echo "Error: Could not find game info for ${game}" >> "${TEMP_DIR}/errors.log"
+                echo "Game info not found for ${game}" >> "${debug_log}"
+                continue
+            fi
+            
+            # Get the path from JSON
+            local file_path
+            file_path=$(echo "${game_info}" | jq -r '.path')
+            
+            if [ -z "${file_path}" ] || [ "${file_path}" = "null" ]; then
+                echo "Error: No file path for ${game}" >> "${TEMP_DIR}/errors.log"
+                echo "No file path for ${game}" >> "${debug_log}"
+                continue
+            fi
+            
+            # Construct the download URL from the path
+            # URL encode the path properly
+            local download_url="${RAW_BASE_URL}/${file_path}"
+            
+            echo "File path: ${file_path}" >> "${debug_log}"
+            echo "Download URL: ${download_url}" >> "${debug_log}"
             
             local retropie_dir
-            retropie_dir=$(echo "${game_info}" | jq -r ".display_name // \"${system}\"" <<< "$(get_system_info "${system}")" | head -1)
             retropie_dir=$(jq -r ".systems[\"${system}\"].retropie_directory" "${JSON_FILE}")
             
+            if [ -z "${retropie_dir}" ] || [ "${retropie_dir}" = "null" ]; then
+                echo "Error: No retropie directory for system ${system}" >> "${TEMP_DIR}/errors.log"
+                echo "No retropie directory for ${system}" >> "${debug_log}"
+                continue
+            fi
+            
             local target_dir="${BASE_ROM_DIR}/${retropie_dir}"
-            mkdir -p "${target_dir}"
+            echo "Target directory: ${target_dir}" >> "${debug_log}"
+            
+            mkdir -p "${target_dir}" 2>> "${debug_log}"
             
             # Download the file
-            wget -q -O "${target_dir}/${game}" "${download_url}" 2>&1 || {
-                echo "Failed to download ${game}" >> "${TEMP_DIR}/errors.log"
-            }
+            echo "Downloading to: ${target_dir}/${game}" >> "${debug_log}"
+            if wget -q -O "${target_dir}/${game}" "${download_url}" 2>> "${debug_log}"; then
+                echo "Successfully downloaded ${game}" >> "${debug_log}"
+            else
+                echo "Failed to download ${game} from ${download_url}" >> "${TEMP_DIR}/errors.log"
+                echo "wget failed for ${game}" >> "${debug_log}"
+            fi
             
         done < "${SELECTION_FILE}"
         
         echo "100"
     } | dialog --gauge "Downloading ROMs..." 10 60 0
     
-    # Clear selections after successful download
+    # Clear selections after download attempt
     > "${SELECTION_FILE}"
     
     # Show errors if any
-    if [ -f "${TEMP_DIR}/errors.log" ]; then
-        dialog --title "Download Errors" --textbox "${TEMP_DIR}/errors.log" 20 70
+    if [ -f "${TEMP_DIR}/errors.log" ] && [ -s "${TEMP_DIR}/errors.log" ]; then
+        # Combine errors and debug log for viewing
+        cat "${debug_log}" >> "${TEMP_DIR}/errors.log"
+        dialog --title "Download Errors (with debug info)" --textbox "${TEMP_DIR}/errors.log" 20 70
     else
-        dialog --msgbox "Successfully downloaded ${sel_count} ROM(s)!" 8 40
+        dialog --msgbox "Successfully downloaded ${sel_count} ROM(s) to ${BASE_ROM_DIR}!" 10 50
     fi
 }
 
