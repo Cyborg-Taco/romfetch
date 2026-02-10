@@ -4,8 +4,6 @@
 # A dialog-based UI for downloading ROMs from the Rom-Collection repository
 #
 
-set -e
-
 # Configuration
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 JSON_FILE="${SCRIPT_DIR}/roms.json"
@@ -359,15 +357,26 @@ main_menu() {
         sel_count=$(get_selection_count)
         
         local choice
-        choice=$(dialog --stdout --title "RetroPie ROM Downloader" \
+        choice=$(dialog --stdout \
+            --cancel-label "Exit" \
+            --title "RetroPie ROM Downloader" \
             --menu "Main Menu (${sel_count} ROMs selected):" 17 60 8 \
             1 "Browse by System" \
             2 "Search for Games" \
             3 "View Selected ROMs" \
             4 "Download Selected ROMs" \
             5 "Clear All Selections" \
-            6 "Update ROM Database" \
-            7 "Exit")
+            6 "Update ROM Database")
+        
+        local exit_code=$?
+        
+        # If cancel/ESC was pressed (exit_code 1 or 255)
+        if [ ${exit_code} -ne 0 ]; then
+            if dialog --defaultno --yesno "Exit ROM Downloader?" 8 40; then
+                exit 0
+            fi
+            continue
+        fi
         
         case "${choice}" in
             1) system_menu ;;
@@ -388,14 +397,6 @@ main_menu() {
                         dialog --msgbox "Failed to update ROM database." 8 40
                     fi
                 fi
-                ;;
-            7)
-                if dialog --defaultno --yesno "Exit ROM Downloader?" 8 40; then
-                    exit 0
-                fi
-                ;;
-            "") 
-                # ESC was pressed, just go back to menu
                 ;;
         esac
     done
