@@ -377,7 +377,17 @@ main_menu() {
                     fi
                 fi
                 ;;
-            7|"") exit 0 ;;
+            7)
+                if dialog --yesno "Exit ROM Downloader?" 8 40; then
+                    exit 0
+                fi
+                ;;
+            "") 
+                # ESC was pressed, confirm exit
+                if dialog --yesno "Exit ROM Downloader?" 8 40; then
+                    exit 0
+                fi
+                ;;
         esac
     done
 }
