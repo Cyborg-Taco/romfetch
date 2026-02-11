@@ -151,6 +151,62 @@ get_selection_count() {
     fi
 }
 
+# Format bytes to human readable size
+format_size() {
+    local bytes=$1
+    
+    if [ "$bytes" -eq 0 ]; then
+        echo "0 B"
+        return
+    fi
+    
+    local kb=1024
+    local mb=$((kb * 1024))
+    local gb=$((mb * 1024))
+    
+    if [ "$bytes" -ge "$gb" ]; then
+        local gb_val=$((bytes / gb))
+        local remainder=$((bytes % gb))
+        local decimal=$((remainder * 100 / gb))
+        printf "%d.%02d GB" "$gb_val" "$decimal"
+    elif [ "$bytes" -ge "$mb" ]; then
+        local mb_val=$((bytes / mb))
+        local remainder=$((bytes % mb))
+        local decimal=$((remainder * 100 / mb))
+        printf "%d.%02d MB" "$mb_val" "$decimal"
+    elif [ "$bytes" -ge "$kb" ]; then
+        local kb_val=$((bytes / kb))
+        local remainder=$((bytes % kb))
+        local decimal=$((remainder * 100 / kb))
+        printf "%d.%02d KB" "$kb_val" "$decimal"
+    else
+        echo "${bytes} B"
+    fi
+}
+
+# Get total size of selected ROMs
+get_selected_size() {
+    local total_size=0
+    
+    if [ ! -f "${SELECTION_FILE}" ] || [ ! -s "${SELECTION_FILE}" ]; then
+        echo "0"
+        return
+    fi
+    
+    while IFS='|' read -r system game; do
+        local game_info
+        game_info=$(get_game_info "${system}" "${game}")
+        
+        if [ -n "${game_info}" ] && [ "${game_info}" != "null" ]; then
+            local size
+            size=$(echo "${game_info}" | jq -r '.size // 0')
+            total_size=$((total_size + size))
+        fi
+    done < "${SELECTION_FILE}"
+    
+    echo "${total_size}"
+}
+
 # Search for games
 search_games() {
     local search_term
@@ -233,6 +289,8 @@ browse_system() {
         
         local options=()
         options+=("0" "< Back")
+        options+=("SELECT_ALL" ">> Select All ROMs in ${system}")
+        
         while IFS= read -r game; do
             local status="[ ]"
             if is_selected "${system}" "${game}"; then
@@ -244,8 +302,13 @@ browse_system() {
         local sel_count
         sel_count=$(get_selection_count)
         
+        local sel_size
+        sel_size=$(get_selected_size)
+        local formatted_size
+        formatted_size=$(format_size "${sel_size}")
+        
         local choice
-        choice=$(dialog --stdout --title "${system} - ${rom_count} ROMs (${sel_count} selected)" \
+        choice=$(dialog --stdout --title "${system} - ${rom_count} ROMs (${sel_count} selected, ${formatted_size})" \
             --cancel-label "Back" \
             --menu "Select a ROM to toggle selection:" 20 70 12 \
             "${options[@]}")
@@ -256,6 +319,42 @@ browse_system() {
         
         if [ "${choice}" = "0" ]; then
             break
+        fi
+        
+        if [ "${choice}" = "SELECT_ALL" ]; then
+            # Count how many will be selected
+            local to_select=0
+            while IFS= read -r game; do
+                if ! is_selected "${system}" "${game}"; then
+                    to_select=$((to_select + 1))
+                fi
+            done <<< "${games}"
+            
+            if [ ${to_select} -eq 0 ]; then
+                dialog --msgbox "All ROMs in ${system} are already selected!" 8 50
+            else
+                # Calculate total size
+                local total_size=0
+                while IFS= read -r game; do
+                    local game_info
+                    game_info=$(get_game_info "${system}" "${game}")
+                    local size
+                    size=$(echo "${game_info}" | jq -r '.size // 0')
+                    total_size=$((total_size + size))
+                done <<< "${games}"
+                
+                local formatted_total
+                formatted_total=$(format_size "${total_size}")
+                
+                if dialog --yesno "Select all ${rom_count} ROMs in ${system}?\n\nTotal size: ${formatted_total}" 10 60; then
+                    while IFS= read -r game; do
+                        if ! is_selected "${system}" "${game}"; then
+                            toggle_selection "${system}" "${game}"
+                        fi
+                    done <<< "${games}"
+                fi
+            fi
+            continue
         fi
         
         toggle_selection "${system}" "${choice}"
@@ -272,7 +371,12 @@ download_selected() {
         return
     fi
     
-    if ! dialog --yesno "Download ${sel_count} selected ROM(s)?" 8 40; then
+    local sel_size
+    sel_size=$(get_selected_size)
+    local formatted_size
+    formatted_size=$(format_size "${sel_size}")
+    
+    if ! dialog --yesno "Download ${sel_count} selected ROM(s)?\n\nTotal size: ${formatted_size}" 10 50; then
         return
     fi
     
@@ -395,11 +499,16 @@ main_menu() {
         local sel_count
         sel_count=$(get_selection_count)
         
+        local sel_size
+        sel_size=$(get_selected_size)
+        local formatted_size
+        formatted_size=$(format_size "${sel_size}")
+        
         local choice
         choice=$(dialog --stdout \
             --cancel-label "Exit" \
             --title "RetroPie ROM Downloader" \
-            --menu "Main Menu (${sel_count} ROMs selected):" 17 60 8 \
+            --menu "Main Menu (${sel_count} ROMs selected, ${formatted_size}):" 17 65 8 \
             1 "Browse by System" \
             2 "Search for Games" \
             3 "View Selected ROMs" \
